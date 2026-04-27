@@ -50,13 +50,13 @@ export default function UserManagement() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
+  const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePhone, setInvitePhone] = useState('');
-  const [inviteMethod, setInviteMethod] = useState<'EMAIL' | 'PHONE'>('EMAIL');
   const [inviteRole, setInviteRole] = useState<UserRole>(UserRole.USER);
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState<string | null>(null);
-  const [lastInviteData, setLastInviteData] = useState<{ email?: string; phone?: string } | null>(null);
+  const [lastInviteData, setLastInviteData] = useState<{ name?: string; email?: string; phone?: string } | null>(null);
   const [invitations, setInvitations] = useState<any[]>([]);
   const [company, setCompany] = useState<CompanySettings | null>(null);
   const [editingUrl, setEditingUrl] = useState(false);
@@ -214,6 +214,7 @@ export default function UserManagement() {
         status: UserStatus.DELETED,
         updatedAt: serverTimestamp()
       });
+      alert('Membro removido do sistema com sucesso.');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
     }
@@ -225,6 +226,7 @@ export default function UserManagement() {
       console.log('Iniciando exclusão de convite:', invId);
       const docRef = doc(db, 'invitations', invId);
       await deleteDoc(docRef);
+      alert('Convite cancelado com sucesso.');
       console.log('Convite excluído com sucesso');
     } catch (error: any) {
       console.error('Erro detalhado ao excluir convite:', error);
@@ -237,9 +239,10 @@ export default function UserManagement() {
     }
   };
 
-  const generateInvitationText = (identifier: string, link: string, method: 'EMAIL' | 'PHONE') => {
-    const label = method === 'EMAIL' ? 'E-MAIL' : 'TELEFONE';
-    return `Olá!\n\nVocê foi convidado para a equipe Sweet Ice PRO.\n\nEste convite é exclusivo para seu ${label}: ${identifier}\n\nPara entrar no sistema, use o Link do App Web abaixo:\n${link}\n\nO sistema identificará seu acesso automaticamente e você poderá completar seu perfil.\n\nSeja bem-vindo(a)!`;
+  const generateInvitationText = (identifier: string, link: string, method: 'EMAIL' | 'PHONE', name?: string) => {
+    const label = method === 'EMAIL' ? 'E-mail' : 'WhatsApp';
+    const namePart = name ? `Olá ${name}!\n\n` : 'Olá!\n\n';
+    return `${namePart}Você foi convidado para a equipe Sweet Ice PRO.\n\nEste convite é vinculado ao seu ${label}: ${identifier}\n\nPara entrar no sistema, use o Link abaixo:\n${link}\n\nO sistema identificará seu acesso automaticamente.\n\nSeja bem-vindo(a)!`;
   };
 
   const handleCopyLink = (link: string) => {
@@ -248,27 +251,16 @@ export default function UserManagement() {
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  const handleShareWhatsApp = (identifier: string, link: string, method: 'EMAIL' | 'PHONE') => {
-    const text = generateInvitationText(identifier, link, method);
+  const handleShareWhatsApp = (identifier: string, link: string, method: 'EMAIL' | 'PHONE', name?: string) => {
+    const text = generateInvitationText(identifier, link, method, name);
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  const handleShareEmail = async (email: string, link: string) => {
+  const handleShareEmail = async (email: string, link: string, name?: string) => {
     setIsEmailing(email);
     try {
-      const authUser: any = auth.currentUser;
-      if (!authUser) throw new Error('Usuário não autenticado');
-
-      // Check if we have an access token with Gmail scope
-      // Firebase doesn't persist the Google access token in the auth object for the web SDK
-      // We might need to re-prompt or use a stored credential if we implemented that.
-      // However, for this environment, we'll try to use the auth credential if available.
-      
-      // Since standard Firebase Web SDK doesn't store the access token, 
-      // we'll implement a fallback to mailto if direct send fails or token is missing.
-      
       const subject = 'Convite de Segurança - Sweet Ice PRO';
-      const body = generateInvitationText(email, link, 'EMAIL');
+      const body = generateInvitationText(email, link, 'EMAIL', name);
 
       // We'll use a specialized function for Gmail API
       const sent = await sendGmailDirect(email, subject, body);
@@ -350,24 +342,39 @@ export default function UserManagement() {
   };
 
   const handleCreateInvitation = async () => {
-    let identifier = inviteMethod === 'EMAIL' ? inviteEmail : invitePhone;
-    if (!identifier || !isManagerOrAdmin) return;
+    const email = inviteEmail.toLowerCase().trim();
+    let phone = invitePhone.trim();
+    const name = inviteName.trim();
+
+    if (!email && !phone) {
+      alert('Por favor, informe pelo menos um E-mail ou Telefone para gerar o convite.');
+      return;
+    }
+
+    if (!isManagerOrAdmin) return;
     
+    // Normalize phone
+    if (phone && !phone.startsWith('+')) {
+      let cleanPhone = phone.replace(/\D/g, '');
+      if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
+      phone = `+55${cleanPhone}`;
+    }
+
     // Check if invitation already exists for this identifier and is still PENDING
     const existingInvite = invitations.find(inv => 
-      (inviteMethod === 'EMAIL' && inv.email === identifier.toLowerCase().trim()) ||
-      (inviteMethod === 'PHONE' && inv.phone === (identifier.startsWith('+') ? identifier : `+55${identifier.replace(/\D/g, '')}`))
+      (email && inv.email === email) ||
+      (phone && inv.phone === phone)
     );
 
     if (existingInvite) {
-      alert(`Já existe um convite pendente para este ${inviteMethod === 'EMAIL' ? 'e-mail' : 'telefone'}.`);
+      alert(`Já existe um convite pendente para este ${email ? 'e-mail' : 'telefone'}.`);
       return;
     }
 
     // Check if user already exists
     const existingUser = users.find(u => 
-      (inviteMethod === 'EMAIL' && u.email === identifier.toLowerCase().trim()) ||
-      (inviteMethod === 'PHONE' && u.phone === (identifier.startsWith('+') ? identifier : `+55${identifier.replace(/\D/g, '')}`))
+      (email && u.email === email) ||
+      (phone && u.phone === phone)
     );
 
     if (existingUser) {
@@ -375,46 +382,38 @@ export default function UserManagement() {
       return;
     }
 
-    // Automatic +55 prefix for phone
-    if (inviteMethod === 'PHONE' && !identifier.startsWith('+')) {
-      let cleanPhone = identifier.replace(/\D/g, '');
-      if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
-      identifier = `+55${cleanPhone}`;
-    }
-
     setIsSendingInvite(true);
     try {
       const inviteData: any = {
-        authMethod: inviteMethod,
         role: inviteRole,
         invitedBy: currentUser?.id,
         createdAt: serverTimestamp(),
-        status: 'PENDING'
+        status: 'PENDING',
+        authMethod: email ? 'EMAIL' : 'PHONE' // Preferred method for display
       };
 
-      if (inviteMethod === 'EMAIL') {
-        inviteData.email = inviteEmail.toLowerCase().trim();
-      } else {
-        inviteData.phone = identifier;
-      }
+      if (name) inviteData.name = name;
+      if (email) inviteData.email = email;
+      if (phone) inviteData.phone = phone;
 
       const docRef = await addDoc(collection(db, 'invitations'), inviteData);
 
       const base = getEffectiveOrigin() || window.location.origin;
       const secureLink = `${base}?inviteId=${docRef.id}`;
       setLastInviteLink(secureLink);
-      setLastInviteData({ email: inviteEmail, phone: identifier });
+      setLastInviteData({ name, email, phone });
 
       await addDoc(collection(db, 'auditLogs'), {
         userId: currentUser?.id,
         action: 'INVITATION_CREATED',
-        details: `Convidou ${identifier} via ${inviteMethod} com cargo ${UserRoleLabels[inviteRole]}`,
+        details: `Convidou ${name || email || phone} com cargo ${UserRoleLabels[inviteRole]}`,
         createdAt: serverTimestamp()
       });
 
       // Clear fields on success
-      if (inviteMethod === 'EMAIL') setInviteEmail('');
-      else setInvitePhone('');
+      setInviteName('');
+      setInviteEmail('');
+      setInvitePhone('');
 
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'invitations');
@@ -798,58 +797,47 @@ export default function UserManagement() {
                 <div className="space-y-6">
                   {!lastInviteLink ? (
                     <div className="space-y-6">
-                      <div className="flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
-                        <button
-                          onClick={() => setInviteMethod('EMAIL')}
-                          className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                            inviteMethod === 'EMAIL' ? "bg-white text-brand-600 shadow-sm" : "text-slate-400"
-                          )}
-                        >
-                          E-mail
-                        </button>
-                        <button
-                          onClick={() => setInviteMethod('PHONE')}
-                          className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                            inviteMethod === 'PHONE' ? "bg-white text-brand-600 shadow-sm" : "text-slate-400"
-                          )}
-                        >
-                          Telefone
-                        </button>
-                      </div>
-
                       <div className="space-y-4 p-6 bg-slate-50 rounded-[32px] border border-slate-100">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                            {inviteMethod === 'EMAIL' ? 'Identificação por E-mail' : 'Identificação por WhatsApp'}
-                          </label>
-                          {inviteMethod === 'EMAIL' ? (
-                            <div className="relative group">
-                              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-brand-600 transition-colors" />
-                              <input 
-                                type="email"
-                                placeholder="colaborador@empresa.com"
-                                value={inviteEmail}
-                                onChange={e => setInviteEmail(e.target.value)}
-                                className="w-full pl-12 pr-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold focus:ring-4 focus:ring-brand-500/10 outline-none transition-all"
-                              />
-                            </div>
-                          ) : (
-                            <div className="relative group">
-                              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-black">
-                                +55
-                              </div>
-                              <input 
-                                id="invite-phone-input-modal"
-                                type="tel"
-                                placeholder="(00) 00000-0000"
-                                value={invitePhone.startsWith('+55') ? invitePhone.substring(3) : invitePhone}
-                                onChange={e => setInvitePhone(e.target.value)}
-                                className="w-full pl-12 pr-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold focus:ring-4 focus:ring-brand-500/10 outline-none transition-all"
-                              />
-                            </div>
-                          )}
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome do Colaborador (Opcional)</label>
+                          <div className="relative group">
+                            <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-brand-600 transition-colors" />
+                            <input 
+                              type="text"
+                              placeholder="Ex: João Silva"
+                              value={inviteName}
+                              onChange={e => setInviteName(e.target.value)}
+                              className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-bold focus:ring-4 focus:ring-brand-500/10 outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
+                          <div className="relative group">
+                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-brand-600 transition-colors" />
+                            <input 
+                              type="email"
+                              placeholder="colaborador@empresa.com"
+                              value={inviteEmail}
+                              onChange={e => setInviteEmail(e.target.value)}
+                              className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-bold focus:ring-4 focus:ring-brand-500/10 outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">WhatsApp / Telefone</label>
+                          <div className="relative group">
+                            <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-brand-600 transition-colors" />
+                            <input 
+                              type="tel"
+                              placeholder="(00) 00000-0000"
+                              value={invitePhone}
+                              onChange={e => setInvitePhone(e.target.value)}
+                              className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-bold focus:ring-4 focus:ring-brand-500/10 outline-none transition-all"
+                            />
+                          </div>
                         </div>
 
                         <div className="space-y-2">
@@ -859,7 +847,7 @@ export default function UserManagement() {
                             <select
                               value={inviteRole}
                               onChange={e => setInviteRole(e.target.value as UserRole)}
-                              className="w-full pl-12 pr-6 py-4 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest outline-none appearance-none cursor-pointer focus:ring-4 focus:ring-brand-500/10 transition-all"
+                              className="w-full pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest outline-none appearance-none cursor-pointer focus:ring-4 focus:ring-brand-500/10 transition-all"
                             >
                               {Object.entries(UserRoleLabels)
                                 .filter(([role]) => effectiveRole === UserRole.ADMIN || role !== UserRole.ADMIN)
@@ -918,7 +906,7 @@ export default function UserManagement() {
                         
                         <button
                           onClick={handleCreateInvitation}
-                          disabled={(inviteMethod === 'EMAIL' ? !inviteEmail : !invitePhone) || isSendingInvite}
+                          disabled={(!inviteEmail && !invitePhone) || isSendingInvite}
                           className="w-full py-5 bg-brand-600 text-white rounded-[24px] text-[11px] font-black uppercase tracking-[0.2em] hover:bg-brand-700 disabled:opacity-50 transition-all flex items-center justify-center gap-3 shadow-xl shadow-brand-500/20 active:scale-95"
                         >
                           {isSendingInvite ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
@@ -938,13 +926,17 @@ export default function UserManagement() {
                         </div>
                         <h4 className="text-sm font-black text-emerald-900 uppercase tracking-tight mb-2">Convite Criado</h4>
                         <p className="text-[10px] font-bold text-emerald-700/70 uppercase leading-relaxed max-w-[200px] mx-auto">
-                          Acesso pré-autorizado para {lastInviteData?.email || lastInviteData?.phone}
+                          Acesso pré-autorizado para {lastInviteData?.name || lastInviteData?.email || lastInviteData?.phone}
                         </p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
                         <button
-                          onClick={() => handleShareWhatsApp(inviteMethod === 'EMAIL' ? inviteEmail : invitePhone, lastInviteLink, inviteMethod)}
+                          onClick={() => {
+                            const identifier = lastInviteData?.phone || lastInviteData?.email || '';
+                            const method = lastInviteData?.phone ? 'PHONE' : 'EMAIL';
+                            handleShareWhatsApp(identifier, lastInviteLink!, method, lastInviteData?.name);
+                          }}
                           className="flex flex-col items-center justify-center gap-3 p-6 bg-slate-50 rounded-[32px] border-2 border-slate-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all group active:scale-95"
                         >
                           <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/10 group-hover:scale-110 transition-transform">
@@ -987,14 +979,15 @@ export default function UserManagement() {
                         {invitations.map(inv => {
                           const base = getEffectiveOrigin() || window.location.origin;
                           const fullLink = `${base}?inviteId=${inv.id}`;
+                          const identifier = inv.name || inv.email || inv.phone || 'Sem Identificação';
                           return (
                             <div key={inv.id} className="group p-4 bg-slate-50 rounded-[24px] border border-slate-100 hover:border-brand-100 hover:bg-white transition-all shadow-sm hover:shadow-xl hover:shadow-brand-500/5">
                               <div className="flex items-center justify-between gap-4 mb-4">
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-[11px] font-black text-slate-900 truncate mb-1">{inv.email || inv.phone}</p>
+                                  <p className="text-[11px] font-black text-slate-900 truncate mb-1">{identifier}</p>
                                   <div className="flex items-center gap-2">
                                     <span className="text-[9px] font-black bg-brand-50 text-brand-600 px-2 py-0.5 rounded-lg uppercase tracking-tighter">{UserRoleLabels[inv.role as UserRole]}</span>
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">• {inv.authMethod}</span>
+                                    {inv.name && (inv.email || inv.phone) && <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">• {inv.email || inv.phone}</span>}
                                   </div>
                                 </div>
                                 <button 
@@ -1018,10 +1011,12 @@ export default function UserManagement() {
                                 </button>
                                 <button 
                                   onClick={() => {
-                                    if (inv.authMethod === 'EMAIL') {
-                                      handleShareEmail(inv.email, fullLink);
+                                    if (inv.email) {
+                                      handleShareEmail(inv.email, fullLink, inv.name);
+                                    } else if (inv.phone) {
+                                      handleShareWhatsApp(inv.phone, fullLink, 'PHONE', inv.name);
                                     } else {
-                                      handleShareWhatsApp(inv.phone, fullLink, 'PHONE');
+                                      handleCopyLink(fullLink);
                                     }
                                   }}
                                   disabled={isEmailing === (inv.email || inv.phone)}
@@ -1029,12 +1024,14 @@ export default function UserManagement() {
                                 >
                                   {isEmailing === (inv.email || inv.phone) ? (
                                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : inv.authMethod === 'EMAIL' ? (
+                                  ) : inv.email ? (
                                     <Send className="w-3.5 h-3.5" />
-                                  ) : (
+                                  ) : inv.phone ? (
                                     <MessageCircle className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
                                   )}
-                                  {inv.authMethod === 'EMAIL' ? 'Enviar E-mail' : 'Enviar WhatsApp'}
+                                  {inv.email ? 'Enviar E-mail' : inv.phone ? 'Enviar WhatsApp' : 'Copiar Link'}
                                 </button>
                               </div>
                             </div>

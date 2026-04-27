@@ -16,9 +16,9 @@ service cloud.firestore {
     // Auth token check for bootstrapping Admin
     function isAdmin() { 
       return isSignedIn() && (
+        request.auth.token.email == 'waralaliju@gmail.com' ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
-        request.auth.token.email == 'waralaliju@gmail.com'
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN')
       );
     }
     
@@ -138,10 +138,14 @@ service cloud.firestore {
     // --- Invitations ---
     match /invitations/{inviteId} {
       function isValidInvitation(data) {
-        return data.keys().hasAll(['authMethod', 'role', 'invitedBy', 'createdAt', 'status']) &&
-               data.authMethod in ['EMAIL', 'PHONE'] &&
+        return data.keys().hasAll(['role', 'invitedBy', 'createdAt', 'status']) &&
                data.role in ['ADMIN', 'MANAGER', 'USER'] &&
-               data.status in ['PENDING', 'ACCEPTED', 'EXPIRED'];
+               data.status in ['PENDING', 'ACCEPTED', 'EXPIRED'] &&
+               (data.keys().contains('email') || data.keys().contains('phone')) &&
+               (!data.keys().contains('email') || (data.email is string && data.email.size() <= 100)) &&
+               (!data.keys().contains('phone') || (data.phone is string && data.phone.size() <= 50)) &&
+               (!data.keys().contains('name') || (data.name is string && data.name.size() <= 100)) &&
+               (!data.keys().contains('authMethod') || data.authMethod in ['EMAIL', 'PHONE']);
       }
 
       allow get: if isSignedIn(); // Needed for checking inviteId on login
