@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    
+    // Auth token check for bootstrapping Admin
+    function isAdmin() { 
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
+        request.auth.token.email == 'waralaliju@gmail.com'
+      );
+    }
+    
+    function isManager() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'MANAGER') ||
+        isAdmin()
+      );
+    }
+
+    function isApproved() {
+      return isSignedIn() && (
+        request.auth.token.email == 'waralaliju@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'APPROVED')
+      );
+    }
+
+    // --- Users ---
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['id', 'name', 'email', 'role', 'status', 'createdAt']) &&
+               data.id == userId &&
+               data.id is string && data.id.size() <= 64 &&
+               data.name is string && data.name.size() <= 100 &&
+               data.email is string && data.email.size() <= 100 &&
+               data.role in ['ADMIN', 'MANAGER', 'USER'] &&
+               data.status in ['PENDING', 'APPROVED', 'BLOCKED', 'DELETED'] &&
+               data.createdAt is timestamp;
+      }
+
+      allow get: if isOwner(userId) || isAdmin() || isManager();
+      allow list: if isApproved() && (isAdmin() || isManager());
+      
+      allow create: if isSignedIn() && isValidId(userId) && (
+        // Self-registration
+        (isOwner(userId) && 
+         incoming().status == 'PENDING' && 
+         incoming().role == 'USER' && 
+         incoming().email == request.auth.token.email &&
+         isValidUser(incoming()) &&
+         incoming().createdAt == request.time) || 
+        // Admin/Manager can pre-create users (with validation)
+        ((isAdmin() || isManager()) && isValidUser(incoming()))
+      );
+      
+      allow update: if isSignedIn() && (
+        // Admin can update ALL fields
+        (isAdmin() && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'status', 'profilePic', 'bio', 'phone', 'address', 'customFields', 'updatedAt', 'isProfileComplete', 'systemUrl'])) ||
+        // Manager can update non-admin roles and status (cannot promote to ADMIN or touch ADMINS)
+        (isManager() && !isAdmin() && existing().role != 'ADMIN' && incoming().role != 'ADMIN' &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'status', 'profilePic', 'bio', 'phone', 'address', 'customFields', 'updatedAt', 'isProfileComplete'])) ||
+        // User can update their own profile (and set isProfileComplete to true)
+        (isOwner(userId) && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'profilePic', 'bio', 'phone', 'address', 'customFields', 'updatedAt', 'isProfileComplete']))
+      );
+      
+      allow delete: if isAdmin();
+    }
+
+    // --- Tasks ---
+    match /tasks/{taskId} {
+      function isValidTask(data) {
+        return data.keys().hasAll(['id', 'title', 'status', 'creatorId', 'createdAt']) &&
+               data.title is string && data.title.size() <= 300 &&
+               data.status in ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'DELAYED'] &&
+               data.creatorId == request.auth.uid &&
+               data.createdAt == request.time;
+      }
+
+      allow read: if isApproved();
+      
+      allow create: if isApproved() && isValidTask(incoming());
+      
+      allow update: if isApproved() && (
+        isAdmin() || isManager() || 
+        existing().creatorId == request.auth.uid || 
+        (request.auth.uid in existing().assignedTo && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
+      
+      allow delete: if isAdmin() || isManager();
+    }
+
+    // --- Chats & Messages ---
+    match /chats/{chatId} {
+      allow read, list: if isApproved() && (isAdmin() || isManager() || request.auth.uid in resource.data.members);
+      allow create: if isApproved() && request.auth.uid in incoming().members;
+      allow update: if isApproved() && request.auth.uid in existing().members &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'name', 'members']);
+
+      match /messages/{messageId} {
+        allow read: if isApproved() && (isAdmin() || isManager() || request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members);
+        allow create: if isApproved() && 
+                        (isAdmin() || isManager() || request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members) &&
+                        incoming().senderId == request.auth.uid &&
+                        incoming().createdAt == request.time;
+      }
+    }
+
+    // --- Notifications ---
+    match /notifications/{notificationId} {
+      allow read: if isApproved() && resource.data.userId == request.auth.uid;
+      allow create: if isApproved() && (isAdmin() || isManager() || incoming().type == 'SYSTEM');
+      allow update: if isApproved() && resource.data.userId == request.auth.uid && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isAdmin();
+    }
+
+    // --- Audit Logs ---
+    match /auditLogs/{logId} {
+      allow read: if isAdmin() || isManager();
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid; 
+    }
+
+    // --- Invitations ---
+    match /invitations/{inviteId} {
+      function isValidInvitation(data) {
+        return data.keys().hasAll(['authMethod', 'role', 'invitedBy', 'createdAt', 'status']) &&
+               data.authMethod in ['EMAIL', 'PHONE'] &&
+               data.role in ['ADMIN', 'MANAGER', 'USER'] &&
+               data.status in ['PENDING', 'ACCEPTED', 'EXPIRED'];
+      }
+
+      allow get: if isSignedIn(); // Needed for checking inviteId on login
+      allow list: if isAdmin() || isManager();
+      allow create: if (isAdmin() || isManager()) && isValidInvitation(incoming());
+      allow update: if (isAdmin() || isManager() || isSignedIn()) && 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acceptedAt', 'userId', 'acceptedBy']);
+      allow delete: if isAdmin() || isManager();
+    }
+
+    // --- Company Settings ---
+    match /settings/company {
+      allow read: if isApproved();
+      allow write: if (isAdmin() || isManager()) && isApproved();
+    }
+  }
+}

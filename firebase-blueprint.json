@@ -1,0 +1,152 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["ADMIN", "MANAGER", "USER"] },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "BLOCKED"] },
+        "profilePic": { "type": "string" },
+        "bio": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "customFields": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "role", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task details, status, and assignments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "IN_PROGRESS", "COMPLETED", "DELAYED"] },
+        "priority": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "recurrence": { "type": "string", "enum": ["NONE", "DAILY", "WEEKLY", "MONTHLY"] },
+        "assignedTo": { "type": "array", "items": { "type": "string" } },
+        "creatorId": { "type": "string" },
+        "justification": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "status", "creatorId", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Conversation between users or in groups",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["DIRECT", "GROUP"] },
+        "name": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "members", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual message in a chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["TEXT", "VOICE", "VIDEO", "FILE"] },
+        "fileUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "chatId", "senderId", "createdAt", "type"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Alert for users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["TASK", "CHAT", "SYSTEM"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "title", "message", "read", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System activity log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "userId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "action", "userId", "timestamp"]
+    },
+    "CompanySettings": {
+      "title": "CompanySettings",
+      "description": "Global settings for the company",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyName": { "type": "string" },
+        "businessSector": { "type": "string" },
+        "taxId": { "type": "string" },
+        "type": { "type": "string", "enum": ["PJ", "PF"] },
+        "logoUrl": { "type": "string" },
+        "primaryColor": { "type": "string" },
+        "secondaryColor": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["id", "companyName", "type"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "System tasks"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Chat metadata"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Chat messages"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "System audit trail"
+    },
+    "/settings/company": {
+      "schema": "CompanySettings",
+      "description": "Global company configuration"
+    }
+  }
+}
